@@ -1,5 +1,6 @@
 # Môi trường & bí mật
 .env
+CLAUDE.md
 
 # Build
 target/

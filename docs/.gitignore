@@ -1,0 +1,25 @@
+# Môi trường & bí mật
+.env
+CLAUDE.md
+
+# Build
+target/
+node_modules/
+dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Runtime
+uploads/
+*.log
+
+# Build FE & cache Python
+build/
+__pycache__/
+
+# Tài liệu & mã mẫu nội bộ (không push)
+/codeMau/
+/pushCode.md
