@@ -1,0 +1,114 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: appointment-service
+  autoconfigure:
+    # Xác thực do Gateway đảm nhận; tắt user/password mặc định mà Boot tự sinh
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+  datasource:
+    # Instant lưu UTC; TIMESTAMP của MySQL quy đổi theo session time zone nên ép session = UTC
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/pet_clinic_appointment_db?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:vetclinic_dev}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 10000
+  jpa:
+    open-in-view: false        # Giải phóng connection ngay sau khi Service kết thúc
+    hibernate:
+      ddl-auto: validate       # Schema chỉ thay đổi qua docs/schema_init.sql (lộ trình v4)
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:vetclinic}
+    password: ${RABBITMQ_PASSWORD:vetclinic_dev}
+    connection-timeout: 5000ms          # RabbitMQ mất kết nối: relay outbox thử lại sớm thay vì treo 60 giây (mặc định)
+    publisher-confirm-type: correlated   # OutboxRelay chờ RabbitMQ xác nhận mới đánh dấu PUBLISHED
+    listener:
+      simple:
+        default-requeue-rejected: false   # Hết retry -> đẩy sang DLQ, không requeue vô hạn
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+          multiplier: 2
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000   # Quy chuẩn 9.1: timeout 2 giây; Circuit Breaker gắn vào mọi Feign client bởi common-library (ResilientFeignConfig)
+            read-timeout: 2000
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10          # docs chỉ ghi cửa sổ 20 / ngưỡng 50%: đặt rõ số lời gọi tối thiểu để đánh giá (mặc định 100 > cửa sổ)
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        # Chỉ lỗi hạ tầng (timeout, mất kết nối, 5xx) làm mở mạch; lỗi nghiệp vụ 4xx của service con (không tìm thấy, sai dữ liệu...) thì không
+        record-failure-predicate: com.vetclinic.common.feign.FeignFailurePredicate
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+vetclinic:
+  security:
+    public-paths:
+      # Portal công khai: tra cứu khung giờ trống không cần đăng nhập (FR-13). Gateway cũng phải cho qua.
+      - /api/v1/appointments/slots
+  booking:
+    zone: Asia/Ho_Chi_Minh
+    slot-minutes: 30
+    # 14 khung giờ tiếp nhận chuẩn (TAI_LIEU_MO_TA_NGHIEP_VU §5.2). Sức chứa mỗi khung = số Bác sĩ ACTIVE (auth-service) × 2 (FR-13, SlotPolicy.APPOINTMENTS_PER_DOCTOR_PER_SLOT)
+    slot-start-times:
+      - "08:00"
+      - "08:30"
+      - "09:00"
+      - "09:30"
+      - "10:00"
+      - "10:30"
+      - "11:00"
+      - "13:30"
+      - "14:00"
+      - "14:30"
+      - "15:00"
+      - "15:30"
+      - "16:00"
+      - "16:30"
+    max-advance-days: 60               # Chỉ cho đặt trước tối đa số ngày này
+    min-cancel-hours-before: 2         # Chủ nuôi chỉ tự hủy/đổi lịch trước giờ hẹn tối thiểu số giờ này
+    no-show-grace-minutes: 30          # Quá giờ BẮT ĐẦU khung hẹn (appointment_date + start_time) thêm số phút này mà chưa check-in thì NO_SHOW
+    no-show-cron: "${BOOKING_NO_SHOW_CRON:0 */5 7-21 * * *}"   # quét mỗi 5 phút (múi giờ vetclinic.booking.zone)
+    # Lịch PENDING quá giờ kết thúc khung mà chưa được duyệt thì tự hủy để trả suất
+    pending-expiry-cron: "${BOOKING_PENDING_EXPIRY_CRON:0 5,20,35,50 7-21 * * *}"
+    slot-lock-timeout-seconds: 5       # Thời gian chờ khóa khung giờ khi có nhiều người đặt cùng lúc
+    # v4.0: đặt lịch luôn gọi clinical-service (GET /internal/pets/{id}) để kiểm tra chủ sở hữu và chụp snapshot nên không còn công tắc verify-pet.
