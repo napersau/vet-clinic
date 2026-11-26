@@ -1,0 +1,22 @@
+# Override cho môi trường phát triển: mở port hạ tầng ra máy host để chạy 1 service trong IDE.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql-server rabbitmq-broker redis mailpit service-registry
+# KHÔNG dùng file này khi demo/bảo vệ.
+services:
+  mysql-server:
+    ports:
+      # Máy đã có MySQL chiếm 3306 thì đặt MYSQL_HOST_PORT=3307 (khi đó chạy service trong IDE với DB_PORT=3307)
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+  rabbitmq-broker:
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # RabbitMQ Management UI
+  redis:
+    ports:
+      - "6379:6379"     # Chạy clinical-service trong IDE (REDIS_HOST=localhost)
+  mailpit:
+    ports:
+      - "1025:1025"     # SMTP
+      - "8025:8025"     # Web UI xem email đã gửi
+  service-registry:
+    ports:
+      - "8761:8761"     # Eureka dashboard

@@ -1,0 +1,6 @@
+# tạo file docker-compose.db.yml với nội dung:
+services:
+  mysql-server:
+    ports:
+      - "3307:3306"
+# rồi chạy:
