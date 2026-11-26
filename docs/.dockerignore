@@ -1,0 +1,4 @@
+# Ngữ cảnh build của image MySQL dựng sẵn (docker-compose.nomount.yml): chỉ cần hai tệp khởi tạo CSDL
+*
+!schema_init.sql
+!seed_demo_data.sql
