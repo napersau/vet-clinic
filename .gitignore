@@ -21,5 +21,5 @@ build/
 __pycache__/
 
 # Tài liệu & mã mẫu nội bộ (không push)
-/codeMau/
+/codeTest/
 /pushCode.md
