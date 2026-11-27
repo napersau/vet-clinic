@@ -1,0 +1,82 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Chỉ định tuyến /api/v1/**, /files/** (ảnh ký tạm) và /ws/**; KHÔNG định tuyến /internal/** (endpoint nội bộ giữa các service)
+          routes:
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/v1/auth/**,/api/v1/users/**,/api/v1/staff/**,/api/v1/roles/**
+            - id: appointment-service
+              uri: lb://appointment-service
+              predicates:
+                - Path=/api/v1/appointments/**
+            - id: clinical-service
+              uri: lb://clinical-service
+              predicates:
+                - Path=/api/v1/clinical/**,/api/v1/pets/**,/api/v1/species/**,/api/v1/catalog/**,/files/**
+            - id: billing-pharmacy-service
+              uri: lb://billing-pharmacy-service
+              predicates:
+                - Path=/api/v1/billing/**,/api/v1/pharmacy/**
+            - id: reporting-service
+              uri: lb://reporting-service
+              predicates:
+                - Path=/api/v1/reports/**
+            - id: notification-service
+              uri: lb://notification-service
+              predicates:
+                - Path=/api/v1/notifications/**
+            - id: notification-websocket
+              uri: lb:ws://notification-service
+              predicates:
+                - Path=/ws/**
+          default-filters:
+            - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin, RETAIN_UNIQUE
+          # CORS chỉ cấu hình tại Gateway (service con không cấu hình để tránh header trùng)
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origin-patterns: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+                allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+                allowed-headers: "*"
+                allow-credentials: true
+                max-age: 3600
+
+vetclinic:
+  gateway:
+    jwt-secret: ${JWT_SECRET}
+    public-paths:
+      - /api/v1/auth/login
+      - /api/v1/auth/refresh
+      - /api/v1/auth/logout
+      - /api/v1/auth/register
+      - /api/v1/appointments/slots   # Portal công khai: xem khung giờ còn trống trước khi đăng nhập (v3.0)
+      - /files/**          # URL ký tạm của ảnh CĐHA: chữ ký + hạn do clinical-service kiểm tra (Quy chuẩn 7.5)
+      - /ws/**            # JWT của WebSocket được kiểm tra trong STOMP CONNECT tại notification-service
+      - /actuator/health/**
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
