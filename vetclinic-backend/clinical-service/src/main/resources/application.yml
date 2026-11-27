@@ -1,0 +1,107 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: clinical-service
+  autoconfigure:
+    # Xác thực do Gateway đảm nhận; tắt user/password mặc định mà Boot tự sinh
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+  datasource:
+    # Instant lưu UTC; TIMESTAMP của MySQL quy đổi theo session time zone nên ép session = UTC
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/pet_clinic_clinical_db?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:vetclinic_dev}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 10000
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 60MB
+  jpa:
+    open-in-view: false        # Giải phóng connection ngay sau khi Service kết thúc
+    hibernate:
+      ddl-auto: validate       # Schema chỉ thay đổi qua docs/schema_init.sql
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 1s     # lỗi / quá hạn -> CLIN_1318 (QUEUE_UNAVAILABLE); MySQL vẫn là nguồn sự thật nên giao dịch tiền không phụ thuộc Redis
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:vetclinic}
+    password: ${RABBITMQ_PASSWORD:vetclinic_dev}
+    connection-timeout: 5000ms          # RabbitMQ mất kết nối: relay outbox thử lại sớm thay vì treo 60 giây (mặc định)
+    publisher-confirm-type: correlated   # OutboxRelay chờ RabbitMQ xác nhận mới đánh dấu PUBLISHED
+    listener:
+      simple:
+        default-requeue-rejected: false   # Hết retry -> đẩy sang DLQ, không requeue vô hạn
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+          multiplier: 2
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000   # Quy chuẩn 9.1: timeout 2 giây; Circuit Breaker gắn vào mọi Feign client bởi common-library (ResilientFeignConfig)
+            read-timeout: 2000
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10          # docs chỉ ghi cửa sổ 20 / ngưỡng 50%: đặt rõ số lời gọi tối thiểu để đánh giá (mặc định 100 > cửa sổ)
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        # Chỉ lỗi hạ tầng (timeout, mất kết nối, 5xx) làm mở mạch; lỗi nghiệp vụ 4xx của service con (không tìm thấy, sai dữ liệu...) thì không
+        record-failure-predicate: com.vetclinic.common.feign.FeignFailurePredicate
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: false   # Redis chết không được làm container clinical "unhealthy" (EX-18: vẫn thu tiền được); lỗi báo CLIN_1318 lúc dùng
+
+vetclinic:
+  clinic:
+    zone: Asia/Ho_Chi_Minh              # Múi giờ vận hành phòng khám (xác định "hôm nay" khi check-in lịch hẹn)
+  security:
+    public-paths:
+      - /files/**       # URL ký tạm của ảnh CĐHA (Quy chuẩn 7.5): chữ ký + hạn thay cho JWT, vì thẻ img không gắn được Authorization
+
+app:
+  storage:
+    root: ${STORAGE_ROOT:./uploads}                      # file_key (imaging/yyyy/MM/<uuidv7>.<đuôi>) nằm dưới thư mục này
+    secret: ${STORAGE_SECRET:${JWT_SECRET:}}             # khóa HMAC ký URL tạm; mặc định dùng chung JWT_SECRET
+    url-ttl: 1h
+    allowed-content-types: image/jpeg,image/png,application/dicom
